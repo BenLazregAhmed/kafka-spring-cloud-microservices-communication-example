@@ -1,0 +1,106 @@
+services:
+  mysql-customer-db:
+    image: mariadb:10.8.3
+    container_name: mysql-customer-db
+    restart: always
+    volumes:
+      - customers_data:/var/lib/mysql
+    environment:
+      MYSQL_DATABASE: customers-db
+      MYSQL_USER: ahmed
+      MYSQL_PASSWORD: 1234
+      MYSQL_ROOT_PASSWORD: admin
+    ports:
+      - 3306:3306
+    healthcheck:
+      test: ["CMD","mysqladmin","ping","-h","localhost"]
+      timeout: 5s
+      retries: 10
+  mysql-account-db:
+    image: mysql
+    container_name: mysql-account-db
+    restart: always
+    environment:
+      MYSQL_DATABASE: accounts-db
+      MYSQL_USER: ahmed2
+      MYSQL_PASSWORD: 12345
+      MYSQL_ROOT_PASSWORD: admin
+    ports:
+      - "3308:3306"
+    expose:
+      - 3308
+    healthcheck:
+      test: ["CMD", 'mysqladmin', 'ping', '-h', 'localhost', '-u', 'root', '-padmin' ]
+      timeout: 5s
+      retries: 10
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.0
+    container_name: zookeeper-server2
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+  broker:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: kafka-broker2
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker2:9092,PLAINTEXT_INTERNAL://broker:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+  customer-service:
+    container_name: customer-service
+    build: ./customer-service
+    restart: on-failure
+    ports:
+      - 8090:8090
+    expose:
+      - 8090
+    environment:
+      MY_SQL_HOST: mysql-customer-db
+      MY_SQL_PORT: 3306
+      MY_SQL_USERNAME: ahmed
+      MY_SQL_PASSWORD: 1234
+      MYSQL_DATABASE: customers-db
+      KAFKA_BOOTSTRAP: kafka-broker2:9092
+    healthcheck:
+      test: [ "CMD","curl","-f","http://customer-service:8090/actuator/health" ]
+      interval: 10s
+      retries: 5
+    depends_on:
+      mysql-customer-db:
+        condition: service_started
+      broker:
+        condition: service_started
+  account-service:
+    container_name: account-service
+    build: ./account-service
+    restart: on-failure
+    ports:
+      - 8085:8085
+    expose:
+      - 8085
+    environment:
+      DB_URL: jdbc:mysql://mysql-account-db:3306/accounts-db?createDatabaseIfNotExist=true
+      #MY_SQL_HOST: mysql-account-db
+      #MY_SQL_PORT: 3308
+      MY_SQL_USERNAME: ahmed2
+      MY_SQL_PASSWORD: 12345
+      MYSQL_DATABASE: accounts-db
+      KAFKA_BOOTSTRAP: kafka-broker2:9092
+    depends_on:
+      mysql-account-db:
+        condition: service_healthy
+      customer-service:
+        condition: service_healthy
+
+
+volumes:
+  customers_data:
